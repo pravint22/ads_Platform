@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watch Ad to Continue</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Monetag Rewarded Interstitial Ad -->
+    <script src='//libtl.com/sdk.js' data-zone='10449312' data-sdk='show_10449312'></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: white;
+        }
+
+        .container {
+            max-width: 400px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        p {
+            font-size: 16px;
+            margin-bottom: 30px;
+            opacity: 0.9;
+            line-height: 1.5;
+        }
+
+        .watch-ad-btn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+            width: 100%;
+        }
+
+        .watch-ad-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);
+        }
+
+        .watch-ad-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .loading {
+            display: none;
+            margin-top: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .status.success {
+            background: rgba(76, 175, 80, 0.3);
+            display: block;
+        }
+
+        .status.error {
+            background: rgba(244, 67, 54, 0.3);
+            display: block;
+        }
+
+        .icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .ad-info {
+            margin-top: 20px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">📺</div>
+        <h1>Watch Ad to Continue</h1>
+        <p>Click the button below to watch a short advertisement and unlock your next video!</p>
+        
+        <button id="watchAdBtn" class="watch-ad-btn">
+            🎬 Watch Ad
+        </button>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 15px;">Loading ad...</p>
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div class="ad-info">
+            Powered by Monetag
+        </div>
+    </div>
+
+    <script>
+        // Initialize Telegram Web App
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        const watchAdBtn = document.getElementById('watchAdBtn');
+        const loading = document.getElementById('loading');
+        const status = document.getElementById('status');
+
+        // Check if Monetag SDK is loaded
+        function isMoneytagLoaded() {
+            return typeof show_10449312 === 'function';
+        }
+
+        watchAdBtn.addEventListener('click', async function() {
+            try {
+                // Check if ad SDK is loaded
+                if (!isMoneytagLoaded()) {
+                    showError('Ad network not ready. Please refresh and try again.');
+                    return;
+                }
+
+                // Disable button
+                watchAdBtn.disabled = true;
+                watchAdBtn.textContent = 'Loading Ad...';
+                loading.classList.add('active');
+                status.style.display = 'none';
+
+                // Show Monetag rewarded interstitial ad
+                show_10449312().then(() => {
+                    // User has successfully watched the ad
+                    console.log('User watched the ad successfully!');
+                    onAdWatched();
+                }).catch((error) => {
+                    // Ad failed to show or user closed it early
+                    console.error('Ad error:', error);
+                    showError('Please watch the complete ad to continue.');
+                    resetButton();
+                });
+
+            } catch (error) {
+                console.error('Error showing ad:', error);
+                showError('Failed to load ad. Please try again.');
+                resetButton();
+            }
+        });
+
+        function onAdWatched() {
+            // Hide loading
+            loading.classList.remove('active');
+            
+            // Show success message
+            status.className = 'status success';
+            status.textContent = '✅ Ad watched! Sending you the next video...';
+            
+            // Send data back to Telegram bot
+            // The bot will receive this data and can process it
+            tg.sendData('ad_watched');
+            
+            // Optional: Send additional data
+            // tg.sendData(JSON.stringify({
+            //     action: 'ad_watched',
+            //     timestamp: Date.now(),
+            //     userId: tg.initDataUnsafe?.user?.id
+            // }));
+            
+            // Close the mini app after a short delay
+            setTimeout(() => {
+                tg.close();
+            }, 1500);
+        }
+
+        function showError(message) {
+            status.className = 'status error';
+            status.textContent = '❌ ' + message;
+        }
+
+        function resetButton() {
+            watchAdBtn.disabled = false;
+            watchAdBtn.textContent = '🎬 Watch Ad';
+            loading.classList.remove('active');
+        }
+
+        // Show Telegram back button
+        tg.BackButton.show();
+        tg.BackButton.onClick(function() {
+            tg.close();
+        });
+
+        // Optional: Log initialization
+        console.log('Telegram Mini App initialized');
+        console.log('User data:', tg.initDataUnsafe);
+    </script>
+</body>
+</html>
