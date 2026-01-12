@@ -7,7 +7,7 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     
     <!-- Monetag Rewarded Interstitial Ad -->
-    <script src='//libtl.com/sdk.js' data-zone='10449312' data-sdk='show_10449312'></script>
+    <script src='//libtl.com/sdk.js' data-zone='10449312' data-sdk='show_10449312' async></script>
     
     <style>
         * {
@@ -120,6 +120,11 @@
             display: block;
         }
 
+        .status.warning {
+            background: rgba(255, 152, 0, 0.3);
+            display: block;
+        }
+
         .icon {
             font-size: 48px;
             margin-bottom: 20px;
@@ -132,6 +137,16 @@
             border-radius: 10px;
             font-size: 12px;
             opacity: 0.8;
+        }
+
+        .debug-info {
+            margin-top: 20px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            font-size: 11px;
+            text-align: left;
+            display: none;
         }
     </style>
 </head>
@@ -155,6 +170,8 @@
         <div class="ad-info">
             Powered by Monetag
         </div>
+
+        <div id="debugInfo" class="debug-info"></div>
     </div>
 
     <script>
@@ -166,68 +183,128 @@
         const watchAdBtn = document.getElementById('watchAdBtn');
         const loading = document.getElementById('loading');
         const status = document.getElementById('status');
+        const debugInfo = document.getElementById('debugInfo');
+
+        let sdkLoadAttempts = 0;
+        const MAX_SDK_WAIT_TIME = 10000; // 10 seconds max wait
+        const SDK_CHECK_INTERVAL = 500; // Check every 500ms
+
+        // Debug logging
+        function logDebug(message) {
+            console.log('[AdPage]', message);
+            debugInfo.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+        }
 
         // Check if Monetag SDK is loaded
         function isMoneytagLoaded() {
-            return typeof show_10449312 === 'function';
+            return typeof window.show_10449312 === 'function';
+        }
+
+        // Wait for SDK to load with timeout
+        function waitForSDK() {
+            return new Promise((resolve, reject) => {
+                const startTime = Date.now();
+                
+                const checkSDK = setInterval(() => {
+                    if (isMoneytagLoaded()) {
+                        clearInterval(checkSDK);
+                        logDebug('✅ Monetag SDK loaded successfully');
+                        resolve();
+                    } else if (Date.now() - startTime > MAX_SDK_WAIT_TIME) {
+                        clearInterval(checkSDK);
+                        logDebug('❌ SDK load timeout');
+                        reject(new Error('SDK load timeout'));
+                    } else {
+                        sdkLoadAttempts++;
+                        logDebug(`Waiting for SDK... (attempt ${sdkLoadAttempts})`);
+                    }
+                }, SDK_CHECK_INTERVAL);
+            });
         }
 
         watchAdBtn.addEventListener('click', async function() {
             try {
-                // Check if ad SDK is loaded
-                if (!isMoneytagLoaded()) {
-                    showError('Ad network not ready. Please refresh and try again.');
-                    return;
-                }
-
+                logDebug('Watch Ad button clicked');
+                
                 // Disable button
                 watchAdBtn.disabled = true;
                 watchAdBtn.textContent = 'Loading Ad...';
                 loading.classList.add('active');
                 status.style.display = 'none';
 
-                // Show Monetag rewarded interstitial ad
-                show_10449312().then(() => {
-                    // User has successfully watched the ad
-                    console.log('User watched the ad successfully!');
+                // Check if SDK is already loaded
+                if (!isMoneytagLoaded()) {
+                    logDebug('SDK not loaded yet, waiting...');
+                    showStatus('Initializing ad network...', 'warning');
+                    
+                    try {
+                        await waitForSDK();
+                    } catch (error) {
+                        throw new Error('Ad network failed to initialize. Please refresh the page and try again.');
+                    }
+                }
+
+                logDebug('Attempting to show ad...');
+                showStatus('Loading advertisement...', 'warning');
+
+                // Call the Monetag ad function
+                try {
+                    // The function name is based on the data-sdk attribute
+                    const adResult = await window.show_10449312();
+                    logDebug('Ad show result: ' + JSON.stringify(adResult));
+                    
+                    // Ad completed successfully
                     onAdWatched();
-                }).catch((error) => {
-                    // Ad failed to show or user closed it early
-                    console.error('Ad error:', error);
-                    showError('Please watch the complete ad to continue.');
+                    
+                } catch (adError) {
+                    logDebug('Ad error: ' + adError.message);
+                    
+                    // Check if it's a user cancellation or actual error
+                    if (adError.message && adError.message.includes('closed')) {
+                        showError('Please watch the complete ad to continue.');
+                    } else if (adError.message && adError.message.includes('no fill')) {
+                        showError('No ads available right now. Please try again in a moment.');
+                    } else {
+                        showError('Failed to load ad. Please try again.');
+                    }
+                    
                     resetButton();
-                });
+                }
 
             } catch (error) {
-                console.error('Error showing ad:', error);
-                showError('Failed to load ad. Please try again.');
+                console.error('Error in ad flow:', error);
+                logDebug('Error: ' + error.message);
+                showError(error.message || 'Failed to load ad. Please try again.');
                 resetButton();
             }
         });
 
         function onAdWatched() {
+            logDebug('Ad watched successfully!');
+            
             // Hide loading
             loading.classList.remove('active');
             
             // Show success message
-            status.className = 'status success';
-            status.textContent = '✅ Ad watched! Sending you the next video...';
+            showStatus('✅ Ad watched! Sending you the next video...', 'success');
             
-            // Send data back to Telegram bot
-            // The bot will receive this data and can process it
-            tg.sendData('ad_watched');
-            
-            // Optional: Send additional data
-            // tg.sendData(JSON.stringify({
-            //     action: 'ad_watched',
-            //     timestamp: Date.now(),
-            //     userId: tg.initDataUnsafe?.user?.id
-            // }));
+            try {
+                // Send data back to Telegram bot
+                tg.sendData('ad_watched');
+                logDebug('Data sent to bot');
+            } catch (error) {
+                logDebug('Error sending data: ' + error.message);
+            }
             
             // Close the mini app after a short delay
             setTimeout(() => {
                 tg.close();
             }, 1500);
+        }
+
+        function showStatus(message, type = 'warning') {
+            status.className = 'status ' + type;
+            status.textContent = message;
         }
 
         function showError(message) {
@@ -247,9 +324,32 @@
             tg.close();
         });
 
-        // Optional: Log initialization
-        console.log('Telegram Mini App initialized');
-        console.log('User data:', tg.initDataUnsafe);
+        // Initialize
+        logDebug('Telegram Mini App initialized');
+        logDebug('User ID: ' + (tg.initDataUnsafe?.user?.id || 'unknown'));
+        
+        // Check SDK on load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (isMoneytagLoaded()) {
+                    logDebug('✅ SDK ready on page load');
+                } else {
+                    logDebug('⚠️ SDK not loaded yet');
+                    showStatus('Preparing ad network...', 'warning');
+                }
+            }, 1000);
+        });
+
+        // Enable debug info on triple click
+        let clickCount = 0;
+        document.querySelector('.icon').addEventListener('click', () => {
+            clickCount++;
+            if (clickCount >= 3) {
+                debugInfo.style.display = 'block';
+                clickCount = 0;
+            }
+            setTimeout(() => { clickCount = 0; }, 2000);
+        });
     </script>
 </body>
 </html>
