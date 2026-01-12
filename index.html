@@ -4,14 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Ad Loader</title>
-
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
+    
     <script src='//libtl.com/sdk.js' data-zone='10449312' data-sdk='show_10449312'></script>
 
     <style>
         body {
-            /* Adapt to Telegram Theme */
             background-color: var(--tg-theme-bg-color, #ffffff); 
             color: var(--tg-theme-text-color, #000000);
             font-family: sans-serif;
@@ -26,69 +24,87 @@
         .loader {
             font-size: 18px;
             font-weight: 500;
-            animation: pulse 1.5s infinite;
+            margin-bottom: 10px;
         }
-        @keyframes pulse {
-            0% { opacity: 0.5; }
-            50% { opacity: 1; }
-            100% { opacity: 0.5; }
+        .timer {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #888);
         }
+        /* Simple spinner */
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--tg-theme-button-color, #3390ec);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-    <div id="status" class="loader">Loading Reward...</div>
+    <div class="spinner"></div>
+    <div id="status" class="loader">Loading Ad...</div>
+    <div id="countdown" class="timer">If ad fails, skipping in 10s</div>
 
     <script>
-        // 1. Initialize Telegram
         const tg = window.Telegram.WebApp;
         tg.expand();
 
-        // 2. Prepare the User Data to send back
-        // We capture this BEFORE showing the ad
+        // Data to send back to bot
         let userData = {
-            user_id: 0,
-            first_name: "Unknown",
-            action: "ad_completed"
+            user_id: tg.initDataUnsafe?.user?.id || 0,
+            first_name: tg.initDataUnsafe?.user?.first_name || "Unknown",
+            action: "ad_completed" // This keyword matches your Python bot logic
         };
 
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-            userData.user_id = tg.initDataUnsafe.user.id;
-            userData.first_name = tg.initDataUnsafe.user.first_name;
+        let rewardClaimed = false;
+        const statusDiv = document.getElementById('status');
+        const countDiv = document.getElementById('countdown');
+
+        // --- FUNCTION TO GRANT REWARD ---
+        function grantReward(reason) {
+            if (rewardClaimed) return; // Prevent double calling
+            rewardClaimed = true;
+
+            statusDiv.textContent = reason;
+            countDiv.textContent = "Closing...";
+            
+            // Send data to Bot
+            tg.sendData(JSON.stringify(userData));
         }
 
-        // 3. Define the function to run the ad
-        function runAdSequence() {
-            const statusDiv = document.getElementById('status');
-
-            if (typeof show_10449312 === 'function') {
-                
-                // Show Ad
-                show_10449312().then(() => {
-                    // --- SUCCESS ---
-                    statusDiv.textContent = "Verifying...";
-                    
-                    // Send JSON string back to bot. 
-                    // This function AUTOMATICALLY closes the Mini App.
-                    tg.sendData(JSON.stringify(userData));
-
-                }).catch((e) => {
-                    // --- ERROR (e.g. AdBlock or No Internet) ---
-                    console.error(e);
-                    statusDiv.textContent = "Ad failed to load.";
-                    // Optional: Close anyway after a delay?
-                    // setTimeout(() => tg.close(), 2000);
-                });
-
+        // --- 1. SET FAILSAFE TIMER (10 Seconds) ---
+        let timeLeft = 10;
+        const timerInterval = setInterval(() => {
+            timeLeft--;
+            if (timeLeft > 0) {
+                countDiv.textContent = `If ad fails, skipping in ${timeLeft}s...`;
             } else {
-                statusDiv.textContent = "Ad SDK missing.";
+                clearInterval(timerInterval);
+                // Time is up! Grant reward anyway.
+                grantReward("Ad took too long. Skipping...");
             }
-        }
+        }, 1000);
 
-        // 4. Trigger automatically on load
-        // We use a slight delay to ensure the SDK is ready
+        // --- 2. ATTEMPT TO LOAD AD ---
         window.onload = function() {
-            setTimeout(runAdSequence, 500); 
+            if (typeof show_10449312 === 'function') {
+                show_10449312().then(() => {
+                    // Ad watched successfully
+                    grantReward("Ad Verified! Sending Reward...");
+                }).catch((e) => {
+                    console.error(e);
+                    // Ad failed (blocked or error) -> Wait for timer or grant immediately?
+                    // Let's just wait for the timer to feel natural, or trigger grantReward immediately:
+                    // grantReward("Ad blocked. Skipping..."); 
+                });
+            } else {
+                // SDK not loaded (AdBlock) -> Wait for timer
+                console.log("SDK missing");
+            }
         };
     </script>
 </body>
