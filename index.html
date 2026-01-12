@@ -1,355 +1,227 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Watch Ad to Continue</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+import logging
+import nest_asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+
+# Allow nested event loops (required for Colab)
+nest_asyncio.apply()
+
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# --- Configuration ---
+BASE_URL = "https://vk25cdn.viralkand.com/8000/{}.mp4"
+START_VIDEO = 8000
+VIDEOS_PER_AD_CYCLE = 3  # How many videos before showing an ad
+BOT_USERNAME = "YOUR_BOT_USERNAME_HERE" # REPLACE THIS with your actual bot username (without @)
+
+# --- Bot Functions ---
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /start command. Supports deep linking (e.g., /start 8005)."""
+    user = update.effective_user
     
-    <!-- Monetag Rewarded Interstitial Ad -->
-    <script src='//libtl.com/sdk.js' data-zone='10449312' data-sdk='show_10449312' async></script>
+    # Initialize user credits if they don't exist
+    if 'credits' not in context.user_data:
+        context.user_data['credits'] = VIDEOS_PER_AD_CYCLE
     
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+    # Check if the user clicked a shared link (e.g., /start 8005)
+    if context.args and context.args[0].isdigit():
+        video_number = int(context.args[0])
+        context.user_data['current_video'] = video_number
+        await send_video(update, context, video_number)
+    else:
+        # Normal start
+        context.user_data['current_video'] = START_VIDEO
+        await update.message.reply_text(
+            f'Hi {user.mention_html()}! 👋\n\n'
+            'I will send you videos from the collection.\n'
+            f'🎁 You get {VIDEOS_PER_AD_CYCLE} free videos before watching an ad.\n\n'
+            'Commands:\n'
+            '/reset - Restart from the beginning',
+            parse_mode='HTML'
+        )
+        await send_video(update, context, START_VIDEO)
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            color: white;
-        }
+async def send_video(update: Update, context: ContextTypes.DEFAULT_TYPE, video_number: int) -> None:
+    """Send video with Share, Previous, and Next buttons."""
+    video_url = BASE_URL.format(video_number)
+    
+    # Get current credits (default to 3 if not set)
+    credits = context.user_data.get('credits', VIDEOS_PER_AD_CYCLE)
+    
+    # 1. Create Share Link (Direct access to this video)
+    # This creates a link like: https://t.me/share/url?url=https://t.me/MyBot?start=8005
+    # Replace 'YOUR_BOT_USERNAME_HERE' at the top with your actual bot username!
+    bot_link = f"https://t.me/{BOT_USERNAME}?start={video_number}"
+    share_url = f"https://t.me/share/url?url={bot_link}&text=Check+out+Video+%23{video_number}!"
 
-        .container {
-            max-width: 400px;
-            width: 100%;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 30px;
-            text-align: center;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
+    # 2. Define Buttons
+    
+    # Row 1: Share Button
+    row1 = [InlineKeyboardButton("📤 Share Video", url=share_url)]
+    
+    # Row 2: Previous & Next
+    row2 = []
+    
+    # Previous Button
+    row2.append(InlineKeyboardButton("⬅️ Prev", callback_data='prev'))
 
-        h1 {
-            font-size: 24px;
-            margin-bottom: 10px;
-            font-weight: 600;
-        }
+    # Next Button Logic (Check Credits)
+    if credits > 0:
+        # If user has credits, show normal Next button
+        row2.append(InlineKeyboardButton(f"Next ({credits} left) ➡", callback_data='next'))
+    else:
+        # If credits are 0, show Ad button to unlock more
+        mini_app_url = context.bot_data.get('mini_app_url', '')
+        row2.append(InlineKeyboardButton("🔓 Watch Ad to Unlock", web_app=WebAppInfo(url=mini_app_url)))
 
-        p {
-            font-size: 16px;
-            margin-bottom: 30px;
-            opacity: 0.9;
-            line-height: 1.5;
-        }
+    keyboard = [row1, row2]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-        .watch-ad-btn {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-            border: none;
-            padding: 16px 32px;
-            border-radius: 50px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
-            width: 100%;
-        }
-
-        .watch-ad-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);
-        }
-
-        .watch-ad-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            box-shadow: none;
-            transform: none;
-        }
-
-        .loading {
-            display: none;
-            margin-top: 20px;
-        }
-
-        .loading.active {
-            display: block;
-        }
-
-        .spinner {
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-top: 3px solid white;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .status {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 10px;
-            font-size: 14px;
-            display: none;
-        }
-
-        .status.success {
-            background: rgba(76, 175, 80, 0.3);
-            display: block;
-        }
-
-        .status.error {
-            background: rgba(244, 67, 54, 0.3);
-            display: block;
-        }
-
-        .status.warning {
-            background: rgba(255, 152, 0, 0.3);
-            display: block;
-        }
-
-        .icon {
-            font-size: 48px;
-            margin-bottom: 20px;
-        }
-
-        .ad-info {
-            margin-top: 20px;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            font-size: 12px;
-            opacity: 0.8;
-        }
-
-        .debug-info {
-            margin-top: 20px;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 10px;
-            font-size: 11px;
-            text-align: left;
-            display: none;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon">📺</div>
-        <h1>Watch Ad to Continue</h1>
-        <p>Click the button below to watch a short advertisement and unlock your next video!</p>
+    try:
+        # Helper text
+        caption = f"📹 <b>Video #{video_number}</b>"
         
-        <button id="watchAdBtn" class="watch-ad-btn">
-            🎬 Watch Ad
-        </button>
-
-        <div id="loading" class="loading">
-            <div class="spinner"></div>
-            <p style="margin-top: 15px;">Loading ad...</p>
-        </div>
-
-        <div id="status" class="status"></div>
-
-        <div class="ad-info">
-            Powered by Monetag
-        </div>
-
-        <div id="debugInfo" class="debug-info"></div>
-    </div>
-
-    <script>
-        // Initialize Telegram Web App
-        let tg = window.Telegram.WebApp;
-        tg.expand();
-        tg.ready();
-
-        const watchAdBtn = document.getElementById('watchAdBtn');
-        const loading = document.getElementById('loading');
-        const status = document.getElementById('status');
-        const debugInfo = document.getElementById('debugInfo');
-
-        let sdkLoadAttempts = 0;
-        const MAX_SDK_WAIT_TIME = 10000; // 10 seconds max wait
-        const SDK_CHECK_INTERVAL = 500; // Check every 500ms
-
-        // Debug logging
-        function logDebug(message) {
-            console.log('[AdPage]', message);
-            debugInfo.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
-        }
-
-        // Check if Monetag SDK is loaded
-        function isMoneytagLoaded() {
-            return typeof window.show_10449312 === 'function';
-        }
-
-        // Wait for SDK to load with timeout
-        function waitForSDK() {
-            return new Promise((resolve, reject) => {
-                const startTime = Date.now();
-                
-                const checkSDK = setInterval(() => {
-                    if (isMoneytagLoaded()) {
-                        clearInterval(checkSDK);
-                        logDebug('✅ Monetag SDK loaded successfully');
-                        resolve();
-                    } else if (Date.now() - startTime > MAX_SDK_WAIT_TIME) {
-                        clearInterval(checkSDK);
-                        logDebug('❌ SDK load timeout');
-                        reject(new Error('SDK load timeout'));
-                    } else {
-                        sdkLoadAttempts++;
-                        logDebug(`Waiting for SDK... (attempt ${sdkLoadAttempts})`);
-                    }
-                }, SDK_CHECK_INTERVAL);
-            });
-        }
-
-        watchAdBtn.addEventListener('click', async function() {
-            try {
-                logDebug('Watch Ad button clicked');
-                
-                // Disable button
-                watchAdBtn.disabled = true;
-                watchAdBtn.textContent = 'Loading Ad...';
-                loading.classList.add('active');
-                status.style.display = 'none';
-
-                // Check if SDK is already loaded
-                if (!isMoneytagLoaded()) {
-                    logDebug('SDK not loaded yet, waiting...');
-                    showStatus('Initializing ad network...', 'warning');
-                    
-                    try {
-                        await waitForSDK();
-                    } catch (error) {
-                        throw new Error('Ad network failed to initialize. Please refresh the page and try again.');
-                    }
-                }
-
-                logDebug('Attempting to show ad...');
-                showStatus('Loading advertisement...', 'warning');
-
-                // Call the Monetag ad function
-                try {
-                    // The function name is based on the data-sdk attribute
-                    const adResult = await window.show_10449312();
-                    logDebug('Ad show result: ' + JSON.stringify(adResult));
-                    
-                    // Ad completed successfully
-                    onAdWatched();
-                    
-                } catch (adError) {
-                    logDebug('Ad error: ' + adError.message);
-                    
-                    // Check if it's a user cancellation or actual error
-                    if (adError.message && adError.message.includes('closed')) {
-                        showError('Please watch the complete ad to continue.');
-                    } else if (adError.message && adError.message.includes('no fill')) {
-                        showError('No ads available right now. Please try again in a moment.');
-                    } else {
-                        showError('Failed to load ad. Please try again.');
-                    }
-                    
-                    resetButton();
-                }
-
-            } catch (error) {
-                console.error('Error in ad flow:', error);
-                logDebug('Error: ' + error.message);
-                showError(error.message || 'Failed to load ad. Please try again.');
-                resetButton();
-            }
-        });
-
-        function onAdWatched() {
-            logDebug('Ad watched successfully!');
+        if update.callback_query:
+            # If updated from a button click
+            await update.callback_query.message.reply_video(
+                video=video_url,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode='HTML'
+            )
+        else:
+            # If sent as a new message
+            await update.message.reply_video(
+                video=video_url,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode='HTML'
+            )
             
-            // Hide loading
-            loading.classList.remove('active');
-            
-            // Show success message
-            showStatus('✅ Ad watched! Sending you the next video...', 'success');
-            
-            try {
-                // Send data back to Telegram bot
-                tg.sendData('ad_watched');
-                logDebug('Data sent to bot');
-            } catch (error) {
-                logDebug('Error sending data: ' + error.message);
-            }
-            
-            // Close the mini app after a short delay
-            setTimeout(() => {
-                tg.close();
-            }, 1500);
-        }
+    except Exception as e:
+        logger.error(f"Error sending video {video_number}: {e}")
+        error_message = f"❌ Could not load video #{video_number}"
+        if update.callback_query:
+            await update.callback_query.message.reply_text(error_message, reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(error_message, reply_markup=reply_markup)
 
-        function showStatus(message, type = 'warning') {
-            status.className = 'status ' + type;
-            status.textContent = message;
-        }
-
-        function showError(message) {
-            status.className = 'status error';
-            status.textContent = '❌ ' + message;
-        }
-
-        function resetButton() {
-            watchAdBtn.disabled = false;
-            watchAdBtn.textContent = '🎬 Watch Ad';
-            loading.classList.remove('active');
-        }
-
-        // Show Telegram back button
-        tg.BackButton.show();
-        tg.BackButton.onClick(function() {
-            tg.close();
-        });
-
-        // Initialize
-        logDebug('Telegram Mini App initialized');
-        logDebug('User ID: ' + (tg.initDataUnsafe?.user?.id || 'unknown'));
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Next and Prev buttons."""
+    query = update.callback_query
+    await query.answer() # Acknowledge the click
+    
+    current_video = context.user_data.get('current_video', START_VIDEO)
+    
+    if query.data == 'next':
+        # Check credits just in case
+        credits = context.user_data.get('credits', VIDEOS_PER_AD_CYCLE)
         
-        // Check SDK on load
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                if (isMoneytagLoaded()) {
-                    logDebug('✅ SDK ready on page load');
-                } else {
-                    logDebug('⚠️ SDK not loaded yet');
-                    showStatus('Preparing ad network...', 'warning');
-                }
-            }, 1000);
-        });
+        if credits > 0:
+            # Deduct 1 credit
+            context.user_data['credits'] = credits - 1
+            
+            # Go to next video
+            next_video = current_video + 1
+            context.user_data['current_video'] = next_video
+            await send_video(update, context, next_video)
+        else:
+            # Should not happen if UI is correct, but safe fallback
+            await query.message.reply_text("⚠️ You need to watch an ad to continue!")
 
-        // Enable debug info on triple click
-        let clickCount = 0;
-        document.querySelector('.icon').addEventListener('click', () => {
-            clickCount++;
-            if (clickCount >= 3) {
-                debugInfo.style.display = 'block';
-                clickCount = 0;
-            }
-            setTimeout(() => { clickCount = 0; }, 2000);
-        });
-    </script>
-</body>
-</html>
+    elif query.data == 'prev':
+        # Previous button does NOT consume credits
+        prev_video = current_video - 1
+        # Prevent going below 0 or start video if you prefer
+        if prev_video < 0: 
+            prev_video = 0
+            
+        context.user_data['current_video'] = prev_video
+        await send_video(update, context, prev_video)
+
+    elif query.data == 'reset':
+        context.user_data['current_video'] = START_VIDEO
+        context.user_data['credits'] = VIDEOS_PER_AD_CYCLE # Optional: Reset credits on reset?
+        await send_video(update, context, START_VIDEO)
+
+async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle data sent from the mini app after watching ad."""
+    try:
+        data = update.message.web_app_data.data
+        
+        # Verify the data sent from your HTML page
+        # Assuming your HTML sends JSON: {"action": "ad_completed", ...} or string "ad_watched"
+        # Adjust logic to match your exact HTML output. 
+        # Here checking for basic string match or simple JSON parsing
+        
+        is_valid = False
+        if data == "ad_watched":
+            is_valid = True
+        elif "ad_completed" in data: # If it's a JSON string
+            is_valid = True
+
+        if is_valid:
+            # 1. Refill Credits
+            context.user_data['credits'] = VIDEOS_PER_AD_CYCLE
+            
+            # 2. Advance to Next Video
+            current_video = context.user_data.get('current_video', START_VIDEO)
+            next_video = current_video + 1
+            context.user_data['current_video'] = next_video
+
+            await update.message.reply_text(
+                "✅ <b>Ad Completed!</b>\n"
+                f"🎉 You earned {VIDEOS_PER_AD_CYCLE} more videos.",
+                parse_mode='HTML'
+            )
+
+            # 3. Send the video
+            await send_video(update, context, next_video)
+        else:
+            await update.message.reply_text("❌ Ad verification failed.")
+
+    except Exception as e:
+        logger.error(f"Error handling web app data: {e}")
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reset command."""
+    context.user_data['current_video'] = START_VIDEO
+    context.user_data['credits'] = VIDEOS_PER_AD_CYCLE
+    await update.message.reply_text("🔄 Resetting...")
+    await send_video(update, context, START_VIDEO)
+
+# --- Main Execution ---
+def main():
+    # 1. ENTER YOUR TOKEN HERE
+    BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN' 
+    
+    # 2. ENTER YOUR MINI APP URL HERE
+    MINI_APP_URL = 'https://ads-platform-zena.vercel.app/'
+
+    if BOT_TOKEN == 'YOUR_TELEGRAM_BOT_TOKEN':
+        print("❌ Error: Please put your actual Bot Token in the code.")
+        return
+
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Store global config
+    application.bot_data['mini_app_url'] = MINI_APP_URL
+
+    # Handlers
+    application.add_handler(CommandHandler("start", start)) # Handles /start and deep links
+    application.add_handler(CommandHandler("reset", reset_command))
+    application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
+
+    print("🤖 Bot is running...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    main()
+            
