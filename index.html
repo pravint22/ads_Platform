@@ -2,254 +2,110 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Watch Ad to Continue</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ad Loader</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     
-    <!-- Monetag Rewarded Interstitial Ad -->
     <script src='//libtl.com/sdk.js' data-zone='10449312' data-sdk='show_10449312'></script>
-    
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
 
+    <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
+            background-color: var(--tg-theme-bg-color, #ffffff); 
+            color: var(--tg-theme-text-color, #000000);
+            font-family: sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
-            color: white;
-        }
-
-        .container {
-            max-width: 400px;
-            width: 100%;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 30px;
+            height: 100vh;
+            margin: 0;
             text-align: center;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
-
-        h1 {
-            font-size: 24px;
-            margin-bottom: 10px;
-            font-weight: 600;
-        }
-
-        p {
-            font-size: 16px;
-            margin-bottom: 30px;
-            opacity: 0.9;
-            line-height: 1.5;
-        }
-
-        .watch-ad-btn {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-            border: none;
-            padding: 16px 32px;
-            border-radius: 50px;
+        .loader {
             font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
-            width: 100%;
+            font-weight: 500;
+            margin-bottom: 10px;
         }
-
-        .watch-ad-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);
-        }
-
-        .watch-ad-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            box-shadow: none;
-            transform: none;
-        }
-
-        .loading {
-            display: none;
-            margin-top: 20px;
-        }
-
-        .loading.active {
-            display: block;
-        }
-
-        .spinner {
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-top: 3px solid white;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .status {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 10px;
+        .timer {
             font-size: 14px;
-            display: none;
+            color: var(--tg-theme-hint-color, #888);
         }
-
-        .status.success {
-            background: rgba(76, 175, 80, 0.3);
-            display: block;
-        }
-
-        .status.error {
-            background: rgba(244, 67, 54, 0.3);
-            display: block;
-        }
-
-        .icon {
-            font-size: 48px;
+        /* Simple spinner */
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--tg-theme-button-color, #3390ec);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
             margin-bottom: 20px;
         }
-
-        .ad-info {
-            margin-top: 20px;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            font-size: 12px;
-            opacity: 0.8;
-        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="icon">📺</div>
-        <h1>Watch Ad to Continue</h1>
-        <p>Click the button below to watch a short advertisement and unlock your next video!</p>
-        
-        <button id="watchAdBtn" class="watch-ad-btn">
-            🎬 Watch Ad
-        </button>
 
-        <div id="loading" class="loading">
-            <div class="spinner"></div>
-            <p style="margin-top: 15px;">Loading ad...</p>
-        </div>
-
-        <div id="status" class="status"></div>
-
-        <div class="ad-info">
-            Powered by Monetag
-        </div>
-    </div>
+    <div class="spinner"></div>
+    <div id="status" class="loader">Loading Ad...</div>
+    <div id="countdown" class="timer">If ad fails, skipping in 10s</div>
 
     <script>
-        // Initialize Telegram Web App
-        let tg = window.Telegram.WebApp;
+        const tg = window.Telegram.WebApp;
         tg.expand();
-        tg.ready();
 
-        const watchAdBtn = document.getElementById('watchAdBtn');
-        const loading = document.getElementById('loading');
-        const status = document.getElementById('status');
+        // Data to send back to bot
+        let userData = {
+            user_id: tg.initDataUnsafe?.user?.id || 0,
+            first_name: tg.initDataUnsafe?.user?.first_name || "Unknown",
+            action: "ad_completed" // This keyword matches your Python bot logic
+        };
 
-        // Check if Monetag SDK is loaded
-        function isMoneytagLoaded() {
-            return typeof show_10449312 === 'function';
+        let rewardClaimed = false;
+        const statusDiv = document.getElementById('status');
+        const countDiv = document.getElementById('countdown');
+
+        // --- FUNCTION TO GRANT REWARD ---
+        function grantReward(reason) {
+            if (rewardClaimed) return; // Prevent double calling
+            rewardClaimed = true;
+
+            statusDiv.textContent = reason;
+            countDiv.textContent = "Closing...";
+            
+            // Send data to Bot
+            tg.sendData(JSON.stringify(userData));
         }
 
-        watchAdBtn.addEventListener('click', async function() {
-            try {
-                // Check if ad SDK is loaded
-                if (!isMoneytagLoaded()) {
-                    showError('Ad network not ready. Please refresh and try again.');
-                    return;
-                }
-
-                // Disable button
-                watchAdBtn.disabled = true;
-                watchAdBtn.textContent = 'Loading Ad...';
-                loading.classList.add('active');
-                status.style.display = 'none';
-
-                // Show Monetag rewarded interstitial ad
-                show_10449312().then(() => {
-                    // User has successfully watched the ad
-                    console.log('User watched the ad successfully!');
-                    onAdWatched();
-                }).catch((error) => {
-                    // Ad failed to show or user closed it early
-                    console.error('Ad error:', error);
-                    showError('Please watch the complete ad to continue.');
-                    resetButton();
-                });
-
-            } catch (error) {
-                console.error('Error showing ad:', error);
-                showError('Failed to load ad. Please try again.');
-                resetButton();
+        // --- 1. SET FAILSAFE TIMER (10 Seconds) ---
+        let timeLeft = 10;
+        const timerInterval = setInterval(() => {
+            timeLeft--;
+            if (timeLeft > 0) {
+                countDiv.textContent = `If ad fails, skipping in ${timeLeft}s...`;
+            } else {
+                clearInterval(timerInterval);
+                // Time is up! Grant reward anyway.
+                grantReward("Ad took too long. Skipping...");
             }
-        });
+        }, 1000);
 
-        function onAdWatched() {
-            // Hide loading
-            loading.classList.remove('active');
-            
-            // Show success message
-            status.className = 'status success';
-            status.textContent = '✅ Ad watched! Sending you the next video...';
-            
-            // Send data back to Telegram bot
-            // The bot will receive this data and can process it
-            tg.sendData('ad_watched');
-            
-            // Optional: Send additional data
-            // tg.sendData(JSON.stringify({
-            //     action: 'ad_watched',
-            //     timestamp: Date.now(),
-            //     userId: tg.initDataUnsafe?.user?.id
-            // }));
-            
-            // Close the mini app after a short delay
-            setTimeout(() => {
-                tg.close();
-            }, 1500);
-        }
-
-        function showError(message) {
-            status.className = 'status error';
-            status.textContent = '❌ ' + message;
-        }
-
-        function resetButton() {
-            watchAdBtn.disabled = false;
-            watchAdBtn.textContent = '🎬 Watch Ad';
-            loading.classList.remove('active');
-        }
-
-        // Show Telegram back button
-        tg.BackButton.show();
-        tg.BackButton.onClick(function() {
-            tg.close();
-        });
-
-        // Optional: Log initialization
-        console.log('Telegram Mini App initialized');
-        console.log('User data:', tg.initDataUnsafe);
+        // --- 2. ATTEMPT TO LOAD AD ---
+        window.onload = function() {
+            if (typeof show_10449312 === 'function') {
+                show_10449312().then(() => {
+                    // Ad watched successfully
+                    grantReward("Ad Verified! Sending Reward...");
+                }).catch((e) => {
+                    console.error(e);
+                    // Ad failed (blocked or error) -> Wait for timer or grant immediately?
+                    // Let's just wait for the timer to feel natural, or trigger grantReward immediately:
+                    // grantReward("Ad blocked. Skipping..."); 
+                });
+            } else {
+                // SDK not loaded (AdBlock) -> Wait for timer
+                console.log("SDK missing");
+            }
+        };
     </script>
 </body>
 </html>
